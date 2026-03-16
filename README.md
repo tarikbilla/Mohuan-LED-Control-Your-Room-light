@@ -10,6 +10,10 @@ A modern Next.js web application for controlling MohuanLED Bluetooth lights. Sup
 ![Python](https://img.shields.io/badge/Python-3.8+-green?style=flat-square&logo=python)
 ![License](https://img.shields.io/badge/License-MIT-green?style=flat-square)
 
+## 📸 Screenshot
+
+![MohuanLED Controller Screenshot](./public/screenshot.png)
+
 ## ✨ Features
 
 - 🔌 **Dual Connection Modes**
@@ -24,41 +28,6 @@ A modern Next.js web application for controlling MohuanLED Bluetooth lights. Sup
   - Strobe Light
 - 📱 **Responsive Design** - Works on desktop and mobile
 - 🔄 **Auto-Fallback** - Automatically switches to Backend API when Web Bluetooth is unavailable
-
-## 🏗️ Architecture
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                     Next.js App                              │
-│                                                              │
-│  ┌─────────────┐                                           │
-│  │  React UI   │                                           │
-│  └──────┬──────┘                                           │
-│         │                                                    │
-│         ▼                                                    │
-│  ┌─────────────────────────────────────┐                    │
-│  │     Connection Mode Selector         │                    │
-│  │                                      │                    │
-│  │  ┌────────────────┐  ┌────────────┐ │                    │
-│  │  │ Web Bluetooth  │  │ Backend API│ │                    │
-│  │  │ (Browser)      │  │ (Python)   │ │                    │
-│  │  └───────┬────────┘  └─────┬──────┘ │                    │
-│  └──────────┼─────────────────┼────────┘                    │
-│             │                 │                              │
-└─────────────┼─────────────────┼──────────────────────────────┘
-              │                 │
-              ▼                 ▼
-    ┌─────────────────┐  ┌─────────────────┐
-    │  MohuanLED      │  │  Python Service │
-    │  (Bluetooth LE) │  │  (Port 3030)    │
-    └─────────────────┘  └────────┬────────┘
-                                   │
-                                   ▼
-                         ┌─────────────────┐
-                         │  MohuanLED      │
-                         │  (Bluetooth LE) │
-                         └─────────────────┘
-```
 
 ## 🚀 Quick Start
 

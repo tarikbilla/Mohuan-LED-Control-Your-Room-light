@@ -488,3 +488,8 @@ Read more: https://nextjs.org/docs/app/api-reference/config/next-config-js/allow
  POST /api/led/connect 422 in 13ms (compile: 3ms, render: 10ms)
  POST /api/led/connect 500 in 11ms (compile: 2ms, render: 9ms)
  GET /api/led 200 in 10ms (compile: 1743µs, render: 8ms)
+ GET / 200 in 53ms (compile: 1843µs, render: 51ms)
+ GET /api/led 200 in 12ms (compile: 1984µs, render: 10ms)
+ POST /api/led/connect 500 in 9ms (compile: 1985µs, render: 7ms)
+✓ Compiled in 543ms
+ GET / 200 in 62ms (compile: 3ms, render: 59ms)
