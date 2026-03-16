@@ -1,15 +1,14 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
-import { Progress } from "@/components/ui/progress";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { Label } from "@/components/ui/label";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -24,312 +23,207 @@ import {
   LightbulbOff,
   Bluetooth,
   BluetoothOff,
-  Search,
   Palette,
   Sun,
   Zap,
   Rainbow,
   Wind,
   StopCircle,
-  RefreshCw,
   Circle,
   Wifi,
   WifiOff,
+  AlertTriangle,
+  Info,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { ledController, LEDState } from "@/lib/led-controller";
 
-// Types
-interface LEDDevice {
-  name: string;
-  mac_address: string;
-  uuids: string[];
-}
-
-interface LEDState {
-  is_on: boolean;
-  rgb_color: [number, number, number];
-  brightness: number;
-  effect: string | null;
-  mac_address: string | null;
-  uuid: string | null;
-  is_connected: boolean;
-}
-
-// LED Service API (port 3030)
-const LED_SERVICE_PORT = 3030;
-const apiCall = async (endpoint: string, options: RequestInit = {}) => {
-  const response = await fetch(`/api/led${endpoint}?XTransformPort=${LED_SERVICE_PORT}`, {
-    ...options,
-    headers: {
-      "Content-Type": "application/json",
-      ...options.headers,
-    },
-  });
-  if (!response.ok) {
-    throw new Error(`API Error: ${response.statusText}`);
-  }
-  return response.json();
-};
+// Preset colors
+const presetColors = [
+  { name: "Red", color: "#ff0000" },
+  { name: "Green", color: "#00ff00" },
+  { name: "Blue", color: "#0000ff" },
+  { name: "Yellow", color: "#ffff00" },
+  { name: "Cyan", color: "#00ffff" },
+  { name: "Magenta", color: "#ff00ff" },
+  { name: "Orange", color: "#ff8000" },
+  { name: "Purple", color: "#8000ff" },
+  { name: "Pink", color: "#ff0080" },
+  { name: "White", color: "#ffffff" },
+  { name: "Warm", color: "#ffaa55" },
+  { name: "Cool", color: "#55aaff" },
+];
 
 export default function LEDController() {
   const { toast } = useToast();
   
   // State
   const [ledState, setLedState] = useState<LEDState>({
-    is_on: false,
-    rgb_color: [255, 255, 255],
+    isOn: false,
+    rgbColor: [255, 255, 255],
     brightness: 255,
     effect: null,
-    mac_address: null,
-    uuid: null,
-    is_connected: false,
+    isConnected: false,
+    deviceName: null,
   });
   
-  const [devices, setDevices] = useState<LEDDevice[]>([]);
-  const [isScanning, setIsScanning] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [selectedColor, setSelectedColor] = useState("#ffffff");
   const [error, setError] = useState<string | null>(null);
-  const [wsConnected, setWsConnected] = useState(false);
-  
-  const wsRef = useRef<WebSocket | null>(null);
-  const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const [isSupported, setIsSupported] = useState(true);
 
-  // WebSocket connection for real-time updates
-  const connectWebSocket = useCallback(() => {
-    if (wsRef.current?.readyState === WebSocket.OPEN) return;
-    
-    const wsUrl = `/api/led/ws?XTransformPort=${LED_SERVICE_PORT}`;
-    const ws = new WebSocket(`ws://${window.location.host}${wsUrl}`);
-    
-    ws.onopen = () => {
-      setWsConnected(true);
-      console.log("WebSocket connected");
-    };
-    
-    ws.onmessage = (event) => {
-      try {
-        const message = JSON.parse(event.data);
-        if (message.type === "state") {
-          setLedState(message.data);
-        }
-      } catch (e) {
-        console.error("WebSocket message error:", e);
+  // Subscribe to LED controller state changes
+  useEffect(() => {
+    // Check Web Bluetooth support
+    if (!ledController.isSupported()) {
+      setIsSupported(false);
+      setError("Web Bluetooth is not supported in this browser. Please use Chrome, Edge, or Opera on a desktop device.");
+    }
+
+    const unsubscribe = ledController.subscribe((state) => {
+      setLedState(state);
+      if (state.rgbColor) {
+        const [r, g, b] = state.rgbColor;
+        setSelectedColor(
+          `#${r.toString(16).padStart(2, "0")}${g.toString(16).padStart(2, "0")}${b.toString(16).padStart(2, "0")}`
+        );
       }
-    };
-    
-    ws.onclose = () => {
-      setWsConnected(false);
-      console.log("WebSocket disconnected");
-      // Reconnect after 3 seconds
-      reconnectTimeoutRef.current = setTimeout(connectWebSocket, 3000);
-    };
-    
-    ws.onerror = (error) => {
-      console.error("WebSocket error:", error);
-    };
-    
-    wsRef.current = ws;
+    });
+
+    return () => unsubscribe();
   }, []);
 
-  // Fetch current state
-  const fetchState = useCallback(async () => {
-    try {
-      const data = await apiCall("/state");
-      setLedState(data);
-      if (data.rgb_color) {
-        const [r, g, b] = data.rgb_color;
-        setSelectedColor(`#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`);
-      }
-    } catch (e) {
-      console.error("Failed to fetch state:", e);
-    }
-  }, []);
-
-  // Scan for devices
-  const scanDevices = async () => {
-    setIsScanning(true);
-    setError(null);
-    try {
-      const data = await apiCall("/scan");
-      setDevices(data.devices || []);
-      if (data.devices?.length === 0) {
-        toast({
-          title: "No devices found",
-          description: "Make sure your LED is powered on and in range.",
-          variant: "destructive",
-        });
-      } else {
-        toast({
-          title: "Found devices",
-          description: `Found ${data.devices.length} LED device(s)`,
-        });
-      }
-    } catch (e) {
-      setError("Failed to scan for devices");
-      toast({
-        title: "Scan failed",
-        description: "Could not scan for Bluetooth devices",
-        variant: "destructive",
-      });
-    } finally {
-      setIsScanning(false);
-    }
-  };
-
-  // Connect to device
-  const connectDevice = async (macAddress: string) => {
+  // Connect to LED
+  const connectDevice = useCallback(async () => {
     setIsConnecting(true);
     setError(null);
     try {
-      await apiCall("/connect", {
-        method: "POST",
-        body: JSON.stringify({ mac_address: macAddress }),
-      });
+      await ledController.connect();
       toast({
-        title: "Connected",
-        description: `Connected to LED at ${macAddress}`,
+        title: "Connected!",
+        description: `Connected to ${ledController.getState().deviceName}`,
       });
-    } catch (e) {
-      setError("Failed to connect to device");
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to connect";
+      setError(message);
       toast({
-        title: "Connection failed",
-        description: "Could not connect to the LED device",
+        title: "Connection Failed",
+        description: message,
         variant: "destructive",
       });
     } finally {
       setIsConnecting(false);
     }
-  };
+  }, [toast]);
 
   // Disconnect
-  const disconnect = async () => {
-    try {
-      await apiCall("/disconnect", { method: "POST" });
-      toast({
-        title: "Disconnected",
-        description: "LED disconnected",
-      });
-    } catch (e) {
-      toast({
-        title: "Disconnect failed",
-        description: "Could not disconnect from LED",
-        variant: "destructive",
-      });
-    }
-  };
+  const disconnect = useCallback(async () => {
+    await ledController.disconnect();
+    toast({
+      title: "Disconnected",
+      description: "LED disconnected",
+    });
+  }, [toast]);
 
   // Turn on
-  const turnOn = async () => {
+  const turnOn = useCallback(async () => {
     setIsLoading(true);
     try {
-      await apiCall("/on", { method: "POST" });
-    } catch (e) {
+      await ledController.turnOn();
+    } catch (err) {
       toast({
         title: "Error",
-        description: "Failed to turn on LED",
+        description: err instanceof Error ? err.message : "Failed to turn on LED",
         variant: "destructive",
       });
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [toast]);
 
   // Turn off
-  const turnOff = async () => {
+  const turnOff = useCallback(async () => {
     setIsLoading(true);
     try {
-      await apiCall("/off", { method: "POST" });
-    } catch (e) {
+      await ledController.turnOff();
+    } catch (err) {
       toast({
         title: "Error",
-        description: "Failed to turn off LED",
+        description: err instanceof Error ? err.message : "Failed to turn off LED",
         variant: "destructive",
       });
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [toast]);
 
   // Set color
-  const setColor = async (r: number, g: number, b: number, brightness?: number) => {
+  const setColor = useCallback(async (r: number, g: number, b: number, brightness?: number) => {
     try {
-      await apiCall("/color", {
-        method: "POST",
-        body: JSON.stringify({ red: r, green: g, blue: b, brightness }),
-      });
-    } catch (e) {
+      await ledController.setColor(r, g, b, brightness);
+    } catch (err) {
       toast({
         title: "Error",
-        description: "Failed to set color",
+        description: err instanceof Error ? err.message : "Failed to set color",
         variant: "destructive",
       });
     }
-  };
+  }, [toast]);
 
   // Set brightness
-  const setBrightness = async (value: number) => {
+  const setBrightness = useCallback(async (value: number) => {
     try {
-      await apiCall("/brightness", {
-        method: "POST",
-        body: JSON.stringify({ brightness: value }),
-      });
-    } catch (e) {
+      await ledController.setBrightness(value);
+    } catch (err) {
       toast({
         title: "Error",
-        description: "Failed to set brightness",
+        description: err instanceof Error ? err.message : "Failed to set brightness",
         variant: "destructive",
       });
     }
-  };
+  }, [toast]);
 
   // Start effect
-  const startEffect = async (effect: string, duration: number = 10, color?: [number, number, number], flashes?: number) => {
+  const startEffect = useCallback(async (effect: string, duration: number = 10) => {
     try {
-      const body: Record<string, unknown> = { duration };
-      if (color) body.color = color;
-      if (flashes) body.flashes = flashes;
-      
-      await apiCall(`/effects/${effect}`, {
-        method: "POST",
-        body: JSON.stringify(body),
-      });
+      switch (effect) {
+        case "rainbow":
+          await ledController.startRainbowEffect(duration);
+          break;
+        case "breathing":
+          await ledController.startBreathingEffect(3);
+          break;
+        case "strobe":
+          await ledController.startStrobeEffect(2, 10);
+          break;
+      }
       toast({
-        title: "Effect started",
+        title: "Effect Started",
         description: `${effect.charAt(0).toUpperCase() + effect.slice(1)} effect started`,
       });
-    } catch (e) {
+    } catch (err) {
       toast({
         title: "Error",
-        description: `Failed to start ${effect} effect`,
+        description: err instanceof Error ? err.message : `Failed to start ${effect} effect`,
         variant: "destructive",
       });
     }
-  };
+  }, [toast]);
 
   // Stop effects
-  const stopEffects = async () => {
-    try {
-      await apiCall("/effects/stop", { method: "POST" });
-      toast({
-        title: "Effects stopped",
-      });
-    } catch (e) {
-      toast({
-        title: "Error",
-        description: "Failed to stop effects",
-        variant: "destructive",
-      });
-    }
-  };
+  const stopEffects = useCallback(() => {
+    ledController.stopEffect();
+    toast({
+      title: "Effects Stopped",
+    });
+  }, [toast]);
 
   // Handle color picker change
   const handleColorChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const hex = e.target.value;
     setSelectedColor(hex);
     
-    // Convert hex to RGB
     const r = parseInt(hex.slice(1, 3), 16);
     const g = parseInt(hex.slice(3, 5), 16);
     const b = parseInt(hex.slice(5, 7), 16);
@@ -337,36 +231,7 @@ export default function LEDController() {
     setColor(r, g, b);
   };
 
-  // Preset colors
-  const presetColors = [
-    { name: "Red", color: "#ff0000" },
-    { name: "Green", color: "#00ff00" },
-    { name: "Blue", color: "#0000ff" },
-    { name: "Yellow", color: "#ffff00" },
-    { name: "Cyan", color: "#00ffff" },
-    { name: "Magenta", color: "#ff00ff" },
-    { name: "Orange", color: "#ff8000" },
-    { name: "Purple", color: "#8000ff" },
-    { name: "Pink", color: "#ff0080" },
-    { name: "White", color: "#ffffff" },
-    { name: "Warm", color: "#ffaa55" },
-    { name: "Cool", color: "#55aaff" },
-  ];
-
-  // Initialize
-  useEffect(() => {
-    fetchState();
-    connectWebSocket();
-    
-    return () => {
-      wsRef.current?.close();
-      if (reconnectTimeoutRef.current) {
-        clearTimeout(reconnectTimeoutRef.current);
-      }
-    };
-  }, [fetchState, connectWebSocket]);
-
-  // Effect icons
+  // Get effect icon
   const getEffectIcon = (effect: string | null) => {
     switch (effect) {
       case "rainbow":
@@ -391,14 +256,14 @@ export default function LEDController() {
             </div>
             <div>
               <h1 className="text-xl font-bold">MohuanLED Controller</h1>
-              <p className="text-sm text-gray-400">Bluetooth LED Control</p>
+              <p className="text-sm text-gray-400">Bluetooth LED Control • Pure Next.js</p>
             </div>
           </div>
           
           <div className="flex items-center gap-4">
             {/* Connection Status */}
             <div className="flex items-center gap-2">
-              {ledState.is_connected ? (
+              {ledState.isConnected ? (
                 <Badge variant="default" className="bg-green-500/20 text-green-400 border-green-500/30">
                   <Wifi className="h-3 w-3 mr-1" />
                   Connected
@@ -410,30 +275,26 @@ export default function LEDController() {
                 </Badge>
               )}
             </div>
-            
-            {/* WebSocket Status */}
-            <div className="flex items-center gap-2">
-              {wsConnected ? (
-                <Badge variant="outline" className="border-green-500/30 text-green-400">
-                  <Circle className="h-2 w-2 fill-green-400 mr-1" />
-                  Live
-                </Badge>
-              ) : (
-                <Badge variant="outline" className="border-yellow-500/30 text-yellow-400">
-                  <Circle className="h-2 w-2 fill-yellow-400 mr-1" />
-                  Reconnecting...
-                </Badge>
-              )}
-            </div>
           </div>
         </div>
       </header>
 
       <main className="container mx-auto px-4 py-6">
+        {/* Browser Support Warning */}
+        {!isSupported && (
+          <Alert className="mb-6 border-yellow-500/50 bg-yellow-500/10">
+            <AlertTriangle className="h-4 w-4 text-yellow-500" />
+            <AlertTitle className="text-yellow-500">Browser Not Supported</AlertTitle>
+            <AlertDescription className="text-yellow-200">
+              Web Bluetooth requires Chrome, Edge, or Opera on desktop. Please switch browsers or use HTTPS on localhost.
+            </AlertDescription>
+          </Alert>
+        )}
+
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* Left Column - Connection */}
           <div className="space-y-6">
-            {/* Device Scanner */}
+            {/* Device Connection */}
             <Card className="bg-white/5 border-white/10 backdrop-blur-sm">
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
@@ -441,65 +302,49 @@ export default function LEDController() {
                   Device Connection
                 </CardTitle>
                 <CardDescription className="text-gray-400">
-                  Scan and connect to your MohuanLED device
+                  Connect to your MohuanLED device via Bluetooth
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
-                <Button
-                  onClick={scanDevices}
-                  disabled={isScanning || isConnecting}
-                  className="w-full bg-gradient-to-r from-blue-500 to-cyan-500 hover:from-blue-600 hover:to-cyan-600"
-                >
-                  {isScanning ? (
-                    <>
-                      <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
-                      Scanning...
-                    </>
-                  ) : (
-                    <>
-                      <Search className="h-4 w-4 mr-2" />
-                      Scan for Devices
-                    </>
-                  )}
-                </Button>
-                
-                {/* Device List */}
-                {devices.length > 0 && (
-                  <ScrollArea className="h-40 rounded-lg border border-white/10">
-                    <div className="p-2 space-y-2">
-                      {devices.map((device) => (
-                        <div
-                          key={device.mac_address}
-                          className="flex items-center justify-between p-3 rounded-lg bg-white/5 hover:bg-white/10 cursor-pointer transition-colors"
-                          onClick={() => !ledState.is_connected && connectDevice(device.mac_address)}
-                        >
-                          <div>
-                            <p className="font-medium">{device.name}</p>
-                            <p className="text-xs text-gray-400">{device.mac_address}</p>
-                          </div>
-                          {ledState.mac_address === device.mac_address ? (
-                            <Badge variant="default" className="bg-green-500">Connected</Badge>
-                          ) : (
-                            <Button size="sm" variant="ghost">
-                              Connect
-                            </Button>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  </ScrollArea>
-                )}
-                
-                {/* Disconnect Button */}
-                {ledState.is_connected && (
+                {!ledState.isConnected ? (
                   <Button
-                    onClick={disconnect}
-                    variant="destructive"
-                    className="w-full"
+                    onClick={connectDevice}
+                    disabled={isConnecting || !isSupported}
+                    className="w-full bg-gradient-to-r from-blue-500 to-cyan-500 hover:from-blue-600 hover:to-cyan-600"
                   >
-                    <BluetoothOff className="h-4 w-4 mr-2" />
-                    Disconnect
+                    {isConnecting ? (
+                      <>
+                        <Circle className="h-4 w-4 mr-2 animate-pulse" />
+                        Connecting...
+                      </>
+                    ) : (
+                      <>
+                        <Bluetooth className="h-4 w-4 mr-2" />
+                        Connect to LED
+                      </>
+                    )}
                   </Button>
+                ) : (
+                  <div className="space-y-4">
+                    <div className="p-4 rounded-lg bg-green-500/10 border border-green-500/20">
+                      <div className="flex items-center gap-2 mb-2">
+                        <Circle className="h-3 w-3 fill-green-400 text-green-400" />
+                        <span className="font-medium text-green-400">Connected</span>
+                      </div>
+                      <p className="text-sm text-gray-400">
+                        Device: {ledState.deviceName}
+                      </p>
+                    </div>
+                    
+                    <Button
+                      onClick={disconnect}
+                      variant="destructive"
+                      className="w-full"
+                    >
+                      <BluetoothOff className="h-4 w-4 mr-2" />
+                      Disconnect
+                    </Button>
+                  </div>
                 )}
               </CardContent>
             </Card>
@@ -510,7 +355,7 @@ export default function LEDController() {
                 <CardTitle className="flex items-center gap-2">
                   Status
                   {ledState.effect && (
-                    <Badge variant="secondary" className="ml-2">
+                    <Badge variant="secondary" className="ml-2 bg-purple-500/20 text-purple-300 border-purple-500/30">
                       {getEffectIcon(ledState.effect)}
                       <span className="ml-1">{ledState.effect}</span>
                     </Badge>
@@ -522,7 +367,7 @@ export default function LEDController() {
                   <div>
                     <p className="text-gray-400">Power</p>
                     <p className="font-medium flex items-center gap-2">
-                      {ledState.is_on ? (
+                      {ledState.isOn ? (
                         <>
                           <Lightbulb className="h-4 w-4 text-yellow-400" />
                           <span className="text-green-400">ON</span>
@@ -545,21 +390,40 @@ export default function LEDController() {
                       <div
                         className="w-4 h-4 rounded-full border border-white/20"
                         style={{
-                          backgroundColor: `rgb(${ledState.rgb_color[0]}, ${ledState.rgb_color[1]}, ${ledState.rgb_color[2]})`
+                          backgroundColor: `rgb(${ledState.rgbColor[0]}, ${ledState.rgbColor[1]}, ${ledState.rgbColor[2]})`
                         }}
                       />
                       <span className="font-mono text-xs">
-                        RGB({ledState.rgb_color.join(", ")})
+                        RGB({ledState.rgbColor.join(", ")})
                       </span>
                     </div>
                   </div>
                   <div>
-                    <p className="text-gray-400">MAC</p>
-                    <p className="font-mono text-xs">
-                      {ledState.mac_address || "Not connected"}
+                    <p className="text-gray-400">Device</p>
+                    <p className="font-medium text-sm truncate">
+                      {ledState.deviceName || "Not connected"}
                     </p>
                   </div>
                 </div>
+              </CardContent>
+            </Card>
+
+            {/* Info Card */}
+            <Card className="bg-white/5 border-white/10 backdrop-blur-sm">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <Info className="h-4 w-4 text-blue-400" />
+                  How to Use
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="text-sm text-gray-400 space-y-2">
+                <p>1. Click "Connect to LED" button</p>
+                <p>2. Select your MohuanLED device from the popup</p>
+                <p>3. Control your light with color, brightness, and effects!</p>
+                <Separator className="my-3 bg-white/10" />
+                <p className="text-xs text-gray-500">
+                  Requires Chrome, Edge, or Opera browser with Bluetooth support.
+                </p>
               </CardContent>
             </Card>
           </div>
@@ -575,7 +439,7 @@ export default function LEDController() {
                 <div className="flex items-center justify-center gap-4">
                   <Button
                     onClick={turnOn}
-                    disabled={!ledState.is_connected || isLoading || ledState.is_on}
+                    disabled={!ledState.isConnected || isLoading || ledState.isOn}
                     size="lg"
                     className="h-20 w-20 rounded-full bg-gradient-to-br from-yellow-400 to-orange-500 hover:from-yellow-500 hover:to-orange-600 disabled:opacity-50"
                   >
@@ -584,7 +448,7 @@ export default function LEDController() {
                   
                   <Button
                     onClick={turnOff}
-                    disabled={!ledState.is_connected || isLoading || !ledState.is_on}
+                    disabled={!ledState.isConnected || isLoading || !ledState.isOn}
                     size="lg"
                     variant="outline"
                     className="h-20 w-20 rounded-full border-white/20 hover:bg-white/10 disabled:opacity-50"
@@ -598,8 +462,8 @@ export default function LEDController() {
                     <Label htmlFor="power-switch">Power</Label>
                     <Switch
                       id="power-switch"
-                      checked={ledState.is_on}
-                      disabled={!ledState.is_connected || isLoading}
+                      checked={ledState.isOn}
+                      disabled={!ledState.isConnected || isLoading}
                       onCheckedChange={(checked) => checked ? turnOn() : turnOff()}
                     />
                   </div>
@@ -623,7 +487,7 @@ export default function LEDController() {
                       type="color"
                       value={selectedColor}
                       onChange={handleColorChange}
-                      disabled={!ledState.is_connected || !ledState.is_on}
+                      disabled={!ledState.isConnected || !ledState.isOn}
                       className="w-32 h-32 rounded-full cursor-pointer border-4 border-white/20 disabled:opacity-50 disabled:cursor-not-allowed"
                     />
                     <div
@@ -649,7 +513,7 @@ export default function LEDController() {
                           const b = parseInt(preset.color.slice(5, 7), 16);
                           setColor(r, g, b);
                         }}
-                        disabled={!ledState.is_connected || !ledState.is_on}
+                        disabled={!ledState.isConnected || !ledState.isOn}
                         className="w-full aspect-square rounded-lg border border-white/20 hover:scale-110 transition-transform disabled:opacity-50 disabled:cursor-not-allowed"
                         style={{ backgroundColor: preset.color }}
                         title={preset.name}
@@ -675,7 +539,7 @@ export default function LEDController() {
                     min={0}
                     max={255}
                     step={1}
-                    disabled={!ledState.is_connected || !ledState.is_on}
+                    disabled={!ledState.isConnected || !ledState.isOn}
                     onValueChange={(value) => setBrightness(value[0])}
                     className="w-full"
                   />
@@ -707,7 +571,7 @@ export default function LEDController() {
                 {/* Rainbow Effect */}
                 <Button
                   onClick={() => startEffect("rainbow", 10)}
-                  disabled={!ledState.is_connected || !ledState.is_on || ledState.effect === "rainbow"}
+                  disabled={!ledState.isConnected || !ledState.isOn || ledState.effect === "rainbow"}
                   className="w-full h-16 bg-gradient-to-r from-red-500 via-yellow-500 via-green-500 via-blue-500 to-purple-500 hover:opacity-90"
                 >
                   <Rainbow className="h-5 w-5 mr-2" />
@@ -716,8 +580,8 @@ export default function LEDController() {
                 
                 {/* Breathing Effect */}
                 <Button
-                  onClick={() => startEffect("breathing", 3, ledState.rgb_color)}
-                  disabled={!ledState.is_connected || !ledState.is_on || ledState.effect === "breathing"}
+                  onClick={() => startEffect("breathing", 3)}
+                  disabled={!ledState.isConnected || !ledState.isOn || ledState.effect === "breathing"}
                   className="w-full h-16 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700"
                 >
                   <Wind className="h-5 w-5 mr-2" />
@@ -726,8 +590,8 @@ export default function LEDController() {
                 
                 {/* Strobe Effect */}
                 <Button
-                  onClick={() => startEffect("strobe", 2, [255, 255, 255], 10)}
-                  disabled={!ledState.is_connected || !ledState.is_on || ledState.effect === "strobe"}
+                  onClick={() => startEffect("strobe", 2)}
+                  disabled={!ledState.isConnected || !ledState.isOn || ledState.effect === "strobe"}
                   className="w-full h-16 bg-gradient-to-r from-yellow-500 to-red-500 hover:from-yellow-600 hover:to-red-600"
                 >
                   <Zap className="h-5 w-5 mr-2" />
@@ -749,36 +613,36 @@ export default function LEDController() {
               </CardContent>
             </Card>
 
-            {/* Effect Settings */}
+            {/* Effect Preview */}
             <Card className="bg-white/5 border-white/10 backdrop-blur-sm">
               <CardHeader>
-                <CardTitle>Effect Preview</CardTitle>
+                <CardTitle>LED Preview</CardTitle>
               </CardHeader>
               <CardContent>
                 <div className="aspect-video rounded-lg bg-black/50 overflow-hidden relative">
                   {/* Simulated LED Preview */}
                   <div
                     className={`absolute inset-4 rounded-lg transition-all duration-300 ${
-                      ledState.is_on ? "opacity-100" : "opacity-0"
+                      ledState.isOn ? "opacity-100" : "opacity-0"
                     }`}
                     style={{
-                      backgroundColor: ledState.is_on
-                        ? `rgb(${ledState.rgb_color[0]}, ${ledState.rgb_color[1]}, ${ledState.rgb_color[2]})`
+                      backgroundColor: ledState.isOn
+                        ? `rgb(${ledState.rgbColor[0]}, ${ledState.rgbColor[1]}, ${ledState.rgbColor[2]})`
                         : "transparent",
-                      boxShadow: ledState.is_on
-                        ? `0 0 ${ledState.brightness / 5}px ${ledState.rgb_color.join(",")}, inset 0 0 ${ledState.brightness / 10}px rgba(255,255,255,0.2)`
+                      boxShadow: ledState.isOn
+                        ? `0 0 ${ledState.brightness / 5}px ${ledState.rgbColor.join(",")}, inset 0 0 ${ledState.brightness / 10}px rgba(255,255,255,0.2)`
                         : "none",
                       filter: `brightness(${(ledState.brightness / 255) * 1.5})`,
                     }}
                   />
                   
-                  {!ledState.is_connected && (
+                  {!ledState.isConnected && (
                     <div className="absolute inset-0 flex items-center justify-center text-gray-500">
                       <p>Connect to LED to preview</p>
                     </div>
                   )}
                   
-                  {ledState.is_connected && !ledState.is_on && (
+                  {ledState.isConnected && !ledState.isOn && (
                     <div className="absolute inset-0 flex items-center justify-center text-gray-500">
                       <p>Turn on to preview</p>
                     </div>
@@ -793,8 +657,8 @@ export default function LEDController() {
       {/* Footer */}
       <footer className="mt-auto border-t border-white/10 bg-black/20 py-4">
         <div className="container mx-auto px-4 flex items-center justify-between text-sm text-gray-400">
-          <p>MohuanLED Controller for macOS</p>
-          <p>Built with Next.js & Bluetooth LE</p>
+          <p>MohuanLED Controller • Pure Next.js</p>
+          <p>Powered by Web Bluetooth API</p>
         </div>
       </footer>
 

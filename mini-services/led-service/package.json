@@ -1,7 +1,0 @@
-{
-  "name": "led-service",
-  "version": "1.0.0",
-  "scripts": {
-    "dev": "python3 index.py"
-  }
-}
