@@ -34,9 +34,11 @@ import {
   WifiOff,
   AlertTriangle,
   Info,
+  Server,
+  Globe,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
-import { ledController, LEDState } from "@/lib/led-controller";
+import { ledController, LEDState, ConnectionMode } from "@/lib/led-controller";
 
 // Preset colors
 const presetColors = [
@@ -65,20 +67,25 @@ export default function LEDController() {
     effect: null,
     isConnected: false,
     deviceName: null,
+    mode: 'unknown',
   });
   
   const [isConnecting, setIsConnecting] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [selectedColor, setSelectedColor] = useState("#ffffff");
   const [error, setError] = useState<string | null>(null);
-  const [isSupported, setIsSupported] = useState(true);
+  const [connectionMode, setConnectionMode] = useState<ConnectionMode>('web-bluetooth');
+  const [isWebBluetoothAvailable, setIsWebBluetoothAvailable] = useState(true);
 
   // Subscribe to LED controller state changes
   useEffect(() => {
-    // Check Web Bluetooth support
-    if (!ledController.isSupported()) {
-      setIsSupported(false);
-      setError("Web Bluetooth is not supported in this browser. Please use Chrome, Edge, or Opera on a desktop device.");
+    // Check Web Bluetooth availability
+    const webBTAvailable = ledController.isWebBluetoothSupported();
+    setIsWebBluetoothAvailable(webBTAvailable);
+    
+    if (!webBTAvailable) {
+      setConnectionMode('backend-api');
+      ledController.setMode('backend-api');
     }
 
     const unsubscribe = ledController.subscribe((state) => {
@@ -99,10 +106,11 @@ export default function LEDController() {
     setIsConnecting(true);
     setError(null);
     try {
+      ledController.setMode(connectionMode);
       await ledController.connect();
       toast({
         title: "Connected!",
-        description: `Connected to ${ledController.getState().deviceName}`,
+        description: `Connected to ${ledController.getState().deviceName} via ${connectionMode === 'web-bluetooth' ? 'Web Bluetooth' : 'Backend API'}`,
       });
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to connect";
@@ -115,7 +123,7 @@ export default function LEDController() {
     } finally {
       setIsConnecting(false);
     }
-  }, [toast]);
+  }, [connectionMode, toast]);
 
   // Disconnect
   const disconnect = useCallback(async () => {
@@ -256,11 +264,32 @@ export default function LEDController() {
             </div>
             <div>
               <h1 className="text-xl font-bold">MohuanLED Controller</h1>
-              <p className="text-sm text-gray-400">Bluetooth LED Control • Pure Next.js</p>
+              <p className="text-sm text-gray-400">Bluetooth LED Control • Next.js</p>
             </div>
           </div>
           
           <div className="flex items-center gap-4">
+            {/* Connection Mode Badge */}
+            {ledState.isConnected && (
+              <Badge variant="outline" className={
+                ledState.mode === 'web-bluetooth' 
+                  ? "border-blue-500/30 text-blue-400"
+                  : "border-green-500/30 text-green-400"
+              }>
+                {ledState.mode === 'web-bluetooth' ? (
+                  <>
+                    <Globe className="h-3 w-3 mr-1" />
+                    Web Bluetooth
+                  </>
+                ) : (
+                  <>
+                    <Server className="h-3 w-3 mr-1" />
+                    Backend API
+                  </>
+                )}
+              </Badge>
+            )}
+            
             {/* Connection Status */}
             <div className="flex items-center gap-2">
               {ledState.isConnected ? (
@@ -280,13 +309,18 @@ export default function LEDController() {
       </header>
 
       <main className="container mx-auto px-4 py-6">
-        {/* Browser Support Warning */}
-        {!isSupported && (
+        {/* Web Bluetooth Not Available Warning */}
+        {!isWebBluetoothAvailable && (
           <Alert className="mb-6 border-yellow-500/50 bg-yellow-500/10">
             <AlertTriangle className="h-4 w-4 text-yellow-500" />
-            <AlertTitle className="text-yellow-500">Browser Not Supported</AlertTitle>
+            <AlertTitle className="text-yellow-500">Web Bluetooth Unavailable</AlertTitle>
             <AlertDescription className="text-yellow-200">
-              Web Bluetooth requires Chrome, Edge, or Opera on desktop. Please switch browsers or use HTTPS on localhost.
+              Web Bluetooth is not available in this environment. Using Backend API mode instead.
+              <br />
+              <strong>Make sure to run the Python backend:</strong>
+              <code className="block mt-2 p-2 bg-black/30 rounded text-sm">
+                python led-backend/led_service.py
+              </code>
             </AlertDescription>
           </Alert>
         )}
@@ -302,28 +336,69 @@ export default function LEDController() {
                   Device Connection
                 </CardTitle>
                 <CardDescription className="text-gray-400">
-                  Connect to your MohuanLED device via Bluetooth
+                  Connect to your MohuanLED device
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
+                {/* Connection Mode Selector */}
+                {isWebBluetoothAvailable && !ledState.isConnected && (
+                  <div className="space-y-2">
+                    <Label className="text-sm text-gray-400">Connection Mode</Label>
+                    <div className="grid grid-cols-2 gap-2">
+                      <Button
+                        variant={connectionMode === 'web-bluetooth' ? 'default' : 'outline'}
+                        size="sm"
+                        onClick={() => setConnectionMode('web-bluetooth')}
+                        className={connectionMode === 'web-bluetooth' 
+                          ? "bg-blue-500 hover:bg-blue-600"
+                          : "border-white/20 hover:bg-white/10"
+                        }
+                      >
+                        <Globe className="h-4 w-4 mr-2" />
+                        Web Bluetooth
+                      </Button>
+                      <Button
+                        variant={connectionMode === 'backend-api' ? 'default' : 'outline'}
+                        size="sm"
+                        onClick={() => setConnectionMode('backend-api')}
+                        className={connectionMode === 'backend-api'
+                          ? "bg-green-500 hover:bg-green-600"
+                          : "border-white/20 hover:bg-white/10"
+                        }
+                      >
+                        <Server className="h-4 w-4 mr-2" />
+                        Backend API
+                      </Button>
+                    </div>
+                  </div>
+                )}
+                
                 {!ledState.isConnected ? (
-                  <Button
-                    onClick={connectDevice}
-                    disabled={isConnecting || !isSupported}
-                    className="w-full bg-gradient-to-r from-blue-500 to-cyan-500 hover:from-blue-600 hover:to-cyan-600"
-                  >
-                    {isConnecting ? (
-                      <>
-                        <Circle className="h-4 w-4 mr-2 animate-pulse" />
-                        Connecting...
-                      </>
-                    ) : (
-                      <>
-                        <Bluetooth className="h-4 w-4 mr-2" />
-                        Connect to LED
-                      </>
+                  <>
+                    <Button
+                      onClick={connectDevice}
+                      disabled={isConnecting}
+                      className="w-full bg-gradient-to-r from-blue-500 to-cyan-500 hover:from-blue-600 hover:to-cyan-600"
+                    >
+                      {isConnecting ? (
+                        <>
+                          <Circle className="h-4 w-4 mr-2 animate-pulse" />
+                          Connecting...
+                        </>
+                      ) : (
+                        <>
+                          <Bluetooth className="h-4 w-4 mr-2" />
+                          Connect to LED
+                        </>
+                      )}
+                    </Button>
+                    
+                    {connectionMode === 'backend-api' && (
+                      <p className="text-xs text-gray-500 text-center">
+                        Requires Python backend running on port 3030
+                      </p>
                     )}
-                  </Button>
+                  </>
                 ) : (
                   <div className="space-y-4">
                     <div className="p-4 rounded-lg bg-green-500/10 border border-green-500/20">
@@ -333,6 +408,9 @@ export default function LEDController() {
                       </div>
                       <p className="text-sm text-gray-400">
                         Device: {ledState.deviceName}
+                      </p>
+                      <p className="text-xs text-gray-500">
+                        Mode: {ledState.mode === 'web-bluetooth' ? 'Web Bluetooth' : 'Backend API'}
                       </p>
                     </div>
                     
@@ -417,13 +495,12 @@ export default function LEDController() {
                 </CardTitle>
               </CardHeader>
               <CardContent className="text-sm text-gray-400 space-y-2">
-                <p>1. Click "Connect to LED" button</p>
-                <p>2. Select your MohuanLED device from the popup</p>
-                <p>3. Control your light with color, brightness, and effects!</p>
+                <p><strong>Web Bluetooth:</strong> Direct browser connection</p>
+                <p><strong>Backend API:</strong> Requires Python service</p>
                 <Separator className="my-3 bg-white/10" />
-                <p className="text-xs text-gray-500">
-                  Requires Chrome, Edge, or Opera browser with Bluetooth support.
-                </p>
+                <code className="block p-2 bg-black/30 rounded text-xs">
+                  python led-backend/led_service.py
+                </code>
               </CardContent>
             </Card>
           </div>
@@ -657,8 +734,8 @@ export default function LEDController() {
       {/* Footer */}
       <footer className="mt-auto border-t border-white/10 bg-black/20 py-4">
         <div className="container mx-auto px-4 flex items-center justify-between text-sm text-gray-400">
-          <p>MohuanLED Controller • Pure Next.js</p>
-          <p>Powered by Web Bluetooth API</p>
+          <p>MohuanLED Controller</p>
+          <p>Web Bluetooth + Backend API</p>
         </div>
       </footer>
 

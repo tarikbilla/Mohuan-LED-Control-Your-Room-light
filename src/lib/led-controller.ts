@@ -1,10 +1,11 @@
 /**
  * MohuanLED Bluetooth Controller
  * 
- * Uses Web Bluetooth API for direct BLE communication from the browser.
- * No backend service required!
+ * Hybrid controller that supports two modes:
+ * 1. Web Bluetooth API - Direct browser-to-LED communication (when available)
+ * 2. Backend API - Via Python service running on localhost:3030
  * 
- * Supported browsers: Chrome, Edge, Opera (requires HTTPS or localhost)
+ * Automatically detects which mode to use based on browser capabilities.
  */
 
 // LED Command definitions
@@ -22,17 +23,14 @@ export interface LEDState {
   effect: string | null;
   isConnected: boolean;
   deviceName: string | null;
+  mode: 'web-bluetooth' | 'backend-api' | 'unknown';
 }
 
-export interface LEDDevice {
-  name: string;
-  id: string;
-}
+export type ConnectionMode = 'web-bluetooth' | 'backend-api';
 
 class LEDBluetoothController {
   private device: BluetoothDevice | null = null;
   private server: BluetoothRemoteGATTServer | null = null;
-  private service: BluetoothRemoteGATTService | null = null;
   private characteristic: BluetoothRemoteGATTCharacteristic | null = null;
   private state: LEDState = {
     isOn: false,
@@ -41,15 +39,29 @@ class LEDBluetoothController {
     effect: null,
     isConnected: false,
     deviceName: null,
+    mode: 'unknown',
   };
   private stateListeners: Set<(state: LEDState) => void> = new Set();
   private effectInterval: NodeJS.Timeout | null = null;
+  private mode: ConnectionMode = 'web-bluetooth';
 
   /**
    * Check if Web Bluetooth is supported
    */
-  isSupported(): boolean {
-    return typeof navigator !== 'undefined' && 'bluetooth' in navigator;
+  isWebBluetoothSupported(): boolean {
+    if (typeof navigator === 'undefined') return false;
+    if (!('bluetooth' in navigator)) return false;
+    
+    // Check if we're in a secure context
+    if (!window.isSecureContext) return false;
+    
+    // Try to check if bluetooth feature is allowed
+    try {
+      // This might throw in restricted environments
+      return typeof navigator.bluetooth.requestDevice === 'function';
+    } catch {
+      return false;
+    }
   }
 
   /**
@@ -84,11 +96,26 @@ class LEDBluetoothController {
   }
 
   /**
-   * Scan and connect to LED device
+   * Get current connection mode
    */
-  async connect(): Promise<boolean> {
-    if (!this.isSupported()) {
-      throw new Error('Web Bluetooth is not supported in this browser. Please use Chrome, Edge, or Opera.');
+  getMode(): ConnectionMode {
+    return this.mode;
+  }
+
+  /**
+   * Set connection mode
+   */
+  setMode(mode: ConnectionMode): void {
+    this.mode = mode;
+    this.updateState({ mode });
+  }
+
+  /**
+   * Connect using Web Bluetooth API
+   */
+  private async connectWebBluetooth(): Promise<boolean> {
+    if (!this.isWebBluetoothSupported()) {
+      throw new Error('Web Bluetooth is not supported or allowed in this context.');
     }
 
     try {
@@ -97,7 +124,6 @@ class LEDBluetoothController {
         filters: [
           { namePrefix: 'BJ_LED_M' },
           { namePrefix: 'LED' },
-          { services: [LED_SERVICE_UUID] },
         ],
         optionalServices: ['generic_access', LED_SERVICE_UUID],
       });
@@ -116,45 +142,140 @@ class LEDBluetoothController {
         throw new Error('Failed to connect to GATT server');
       }
 
-      // Get service and characteristic
-      try {
-        this.service = await this.server.getPrimaryService(LED_SERVICE_UUID);
-        this.characteristic = await this.service.getCharacteristic(LED_CHARACTERISTIC_UUID);
-      } catch {
-        // Try to discover services automatically
-        const services = await this.server.getPrimaryServices();
-        for (const service of services) {
-          try {
-            const characteristics = await service.getCharacteristics();
-            for (const char of characteristics) {
-              if (char.properties.write) {
-                this.service = service;
-                this.characteristic = char;
-                console.log('Found writable characteristic:', char.uuid);
-                break;
-              }
-            }
-            if (this.characteristic) break;
-          } catch (e) {
-            console.log('Service exploration error:', e);
+      // Find writable characteristic
+      const services = await this.server.getPrimaryServices();
+      for (const service of services) {
+        const characteristics = await service.getCharacteristics();
+        for (const char of characteristics) {
+          if (char.properties.write) {
+            this.characteristic = char;
+            console.log('Found writable characteristic:', char.uuid);
+            break;
           }
         }
+        if (this.characteristic) break;
       }
 
       if (!this.characteristic) {
         throw new Error('No writable characteristic found');
       }
 
+      this.mode = 'web-bluetooth';
       this.updateState({
         isConnected: true,
         deviceName: this.device.name || 'Unknown',
+        mode: 'web-bluetooth',
       });
 
       return true;
     } catch (error) {
-      console.error('Connection error:', error);
+      console.error('Web Bluetooth connection error:', error);
       throw error;
     }
+  }
+
+  /**
+   * Connect using Backend API
+   */
+  private async connectBackendAPI(): Promise<boolean> {
+    try {
+      // First check if backend is running
+      const healthCheck = await fetch('/api/led');
+      if (!healthCheck.ok) {
+        throw new Error('LED backend service is not running. Please start it with: python led-backend/led_service.py');
+      }
+
+      // Connect via backend
+      const response = await fetch('/api/led/connect', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || 'Failed to connect via backend');
+      }
+
+      const data = await response.json();
+      
+      this.mode = 'backend-api';
+      this.updateState({
+        isConnected: true,
+        deviceName: data.device || 'LED Device',
+        mode: 'backend-api',
+      });
+
+      // Start polling for state updates
+      this.startStatePolling();
+
+      return true;
+    } catch (error) {
+      console.error('Backend API connection error:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Poll backend for state updates
+   */
+  private pollingInterval: NodeJS.Timeout | null = null;
+  
+  private startStatePolling(): void {
+    if (this.pollingInterval) return;
+    
+    this.pollingInterval = setInterval(async () => {
+      if (this.mode !== 'backend-api' || !this.state.isConnected) {
+        return;
+      }
+      
+      try {
+        const response = await fetch('/api/led');
+        if (response.ok) {
+          const data = await response.json();
+          this.updateState({
+            isOn: data.is_on,
+            rgbColor: data.rgb_color,
+            brightness: data.brightness,
+            effect: data.effect,
+            deviceName: data.device_name,
+            isConnected: data.is_connected,
+          });
+        }
+      } catch (e) {
+        console.error('State polling error:', e);
+      }
+    }, 1000);
+  }
+
+  private stopStatePolling(): void {
+    if (this.pollingInterval) {
+      clearInterval(this.pollingInterval);
+      this.pollingInterval = null;
+    }
+  }
+
+  /**
+   * Connect to LED (auto-detect best method)
+   */
+  async connect(): Promise<boolean> {
+    // Try Web Bluetooth first if supported
+    if (this.isWebBluetoothSupported()) {
+      try {
+        return await this.connectWebBluetooth();
+      } catch (error) {
+        console.log('Web Bluetooth failed, trying backend API...');
+      }
+    }
+
+    // Fall back to backend API
+    return await this.connectBackendAPI();
+  }
+
+  /**
+   * Connect using backend API specifically
+   */
+  async connectWithBackend(): Promise<boolean> {
+    return await this.connectBackendAPI();
   }
 
   /**
@@ -163,9 +284,9 @@ class LEDBluetoothController {
   private onDisconnected(): void {
     this.device = null;
     this.server = null;
-    this.service = null;
     this.characteristic = null;
     this.stopEffect();
+    this.stopStatePolling();
     this.updateState({
       isConnected: false,
       isOn: false,
@@ -178,16 +299,26 @@ class LEDBluetoothController {
    * Disconnect from device
    */
   async disconnect(): Promise<void> {
-    if (this.device?.gatt?.connected) {
+    this.stopEffect();
+    
+    if (this.mode === 'web-bluetooth' && this.device?.gatt?.connected) {
       this.device.gatt.disconnect();
+    } else if (this.mode === 'backend-api') {
+      try {
+        await fetch('/api/led/disconnect', { method: 'POST' });
+      } catch (e) {
+        console.error('Disconnect error:', e);
+      }
     }
+    
+    this.stopStatePolling();
     this.onDisconnected();
   }
 
   /**
    * Write command to LED
    */
-  private async write(data: Uint8Array): Promise<void> {
+  private async writeWebBluetooth(data: Uint8Array): Promise<void> {
     if (!this.characteristic) {
       throw new Error('Not connected to LED');
     }
@@ -198,8 +329,13 @@ class LEDBluetoothController {
    * Turn LED on
    */
   async turnOn(): Promise<void> {
-    await this.write(TURN_ON_CMD);
-    this.updateState({ isOn: true });
+    if (this.mode === 'web-bluetooth') {
+      await this.writeWebBluetooth(TURN_ON_CMD);
+      this.updateState({ isOn: true });
+    } else {
+      const response = await fetch('/api/led/on', { method: 'POST' });
+      if (!response.ok) throw new Error('Failed to turn on');
+    }
   }
 
   /**
@@ -207,8 +343,14 @@ class LEDBluetoothController {
    */
   async turnOff(): Promise<void> {
     this.stopEffect();
-    await this.write(TURN_OFF_CMD);
-    this.updateState({ isOn: false, effect: null });
+    
+    if (this.mode === 'web-bluetooth') {
+      await this.writeWebBluetooth(TURN_OFF_CMD);
+      this.updateState({ isOn: false, effect: null });
+    } else {
+      const response = await fetch('/api/led/off', { method: 'POST' });
+      if (!response.ok) throw new Error('Failed to turn off');
+    }
   }
 
   /**
@@ -217,19 +359,27 @@ class LEDBluetoothController {
   async setColor(r: number, g: number, b: number, brightness?: number): Promise<void> {
     const br = brightness ?? this.state.brightness;
     
-    // Apply brightness scaling
-    const red = Math.round((r * br) / 255);
-    const green = Math.round((g * br) / 255);
-    const blue = Math.round((b * br) / 255);
+    if (this.mode === 'web-bluetooth') {
+      // Apply brightness scaling
+      const red = Math.round((r * br) / 255);
+      const green = Math.round((g * br) / 255);
+      const blue = Math.round((b * br) / 255);
 
-    // Build color packet
-    const colorCmd = new Uint8Array([0x69, 0x96, 0x05, 0x02, red, green, blue]);
-    await this.write(colorCmd);
-    
-    this.updateState({
-      rgbColor: [r, g, b],
-      brightness: br,
-    });
+      const colorCmd = new Uint8Array([0x69, 0x96, 0x05, 0x02, red, green, blue]);
+      await this.writeWebBluetooth(colorCmd);
+      
+      this.updateState({
+        rgbColor: [r, g, b],
+        brightness: br,
+      });
+    } else {
+      const response = await fetch('/api/led/color', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ red: r, green: g, blue: b, brightness: br }),
+      });
+      if (!response.ok) throw new Error('Failed to set color');
+    }
   }
 
   /**
@@ -248,6 +398,11 @@ class LEDBluetoothController {
       clearInterval(this.effectInterval);
       this.effectInterval = null;
     }
+    
+    if (this.mode === 'backend-api') {
+      fetch('/api/led/effects/stop', { method: 'POST' }).catch(() => {});
+    }
+    
     this.updateState({ effect: null });
   }
 
@@ -256,6 +411,18 @@ class LEDBluetoothController {
    */
   async startRainbowEffect(duration: number = 10): Promise<void> {
     this.stopEffect();
+    
+    if (this.mode === 'backend-api') {
+      const response = await fetch('/api/led/effects/rainbow', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ duration }),
+      });
+      if (!response.ok) throw new Error('Failed to start rainbow effect');
+      this.updateState({ effect: 'rainbow' });
+      return;
+    }
+
     this.updateState({ effect: 'rainbow' });
     
     const steps = 360;
@@ -280,6 +447,18 @@ class LEDBluetoothController {
    */
   async startBreathingEffect(duration: number = 3): Promise<void> {
     this.stopEffect();
+    
+    if (this.mode === 'backend-api') {
+      const response = await fetch('/api/led/effects/breathing', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ duration }),
+      });
+      if (!response.ok) throw new Error('Failed to start breathing effect');
+      this.updateState({ effect: 'breathing' });
+      return;
+    }
+
     this.updateState({ effect: 'breathing' });
     
     const steps = 50;
@@ -312,6 +491,18 @@ class LEDBluetoothController {
    */
   async startStrobeEffect(duration: number = 2, flashes: number = 10): Promise<void> {
     this.stopEffect();
+    
+    if (this.mode === 'backend-api') {
+      const response = await fetch('/api/led/effects/strobe', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ duration, flashes }),
+      });
+      if (!response.ok) throw new Error('Failed to start strobe effect');
+      this.updateState({ effect: 'strobe' });
+      return;
+    }
+
     this.updateState({ effect: 'strobe' });
     
     const delay = (duration * 1000) / (flashes * 2);
@@ -329,7 +520,7 @@ class LEDBluetoothController {
       if (isOn) {
         await this.setColor(r, g, b, 255);
       } else {
-        await this.write(TURN_OFF_CMD);
+        await this.writeWebBluetooth(TURN_OFF_CMD);
       }
 
       isOn = !isOn;

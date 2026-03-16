@@ -1,14 +1,20 @@
 # 🌈 MohuanLED Controller
 
-A modern Next.js web application for controlling MohuanLED Bluetooth lights directly from your browser. No backend required - uses the Web Bluetooth API for direct BLE communication!
+A modern Next.js web application for controlling MohuanLED Bluetooth lights. Supports **two connection modes**:
+
+1. **Web Bluetooth API** - Direct browser-to-LED communication (Chrome, Edge, Opera)
+2. **Backend API** - Via Python service for environments where Web Bluetooth is blocked
 
 ![Next.js](https://img.shields.io/badge/Next.js-16-black?style=flat-square&logo=next.js)
 ![Web Bluetooth](https://img.shields.io/badge/Web%20Bluetooth-API-blue?style=flat-square&logo=bluetooth)
+![Python](https://img.shields.io/badge/Python-3.8+-green?style=flat-square&logo=python)
 ![License](https://img.shields.io/badge/License-MIT-green?style=flat-square)
 
 ## ✨ Features
 
-- 🔌 **Direct Bluetooth LE Connection** - Connect directly from the browser, no backend needed!
+- 🔌 **Dual Connection Modes**
+  - Web Bluetooth (direct browser connection)
+  - Backend API (via Python service)
 - 💡 **Power Control** - Turn lights on/off with a single click
 - 🎨 **Color Picker** - Full RGB color selection with preset colors
 - ☀️ **Brightness Control** - Adjustable brightness from 0-100%
@@ -17,26 +23,41 @@ A modern Next.js web application for controlling MohuanLED Bluetooth lights dire
   - Breathing Effect
   - Strobe Light
 - 📱 **Responsive Design** - Works on desktop and mobile
-- 🚀 **Pure Next.js** - No Python, no backend services!
+- 🔄 **Auto-Fallback** - Automatically switches to Backend API when Web Bluetooth is unavailable
 
 ## 🏗️ Architecture
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│                    Next.js App                          │
-│                                                         │
-│   ┌─────────────┐    ┌─────────────────────────────┐   │
-│   │  React UI   │───▶│  Web Bluetooth API          │   │
-│   │  (Browser)  │◀───│  (Direct BLE Communication) │   │
-│   └─────────────┘    └─────────────────────────────┘   │
-│                                                         │
-└─────────────────────────────────────────────────────────┘
-                          │
-                          ▼
-              ┌───────────────────────┐
-              │   MohuanLED Device    │
-              │   (Bluetooth LE)      │
-              └───────────────────────┘
+┌─────────────────────────────────────────────────────────────┐
+│                     Next.js App                              │
+│                                                              │
+│  ┌─────────────┐                                           │
+│  │  React UI   │                                           │
+│  └──────┬──────┘                                           │
+│         │                                                    │
+│         ▼                                                    │
+│  ┌─────────────────────────────────────┐                    │
+│  │     Connection Mode Selector         │                    │
+│  │                                      │                    │
+│  │  ┌────────────────┐  ┌────────────┐ │                    │
+│  │  │ Web Bluetooth  │  │ Backend API│ │                    │
+│  │  │ (Browser)      │  │ (Python)   │ │                    │
+│  │  └───────┬────────┘  └─────┬──────┘ │                    │
+│  └──────────┼─────────────────┼────────┘                    │
+│             │                 │                              │
+└─────────────┼─────────────────┼──────────────────────────────┘
+              │                 │
+              ▼                 ▼
+    ┌─────────────────┐  ┌─────────────────┐
+    │  MohuanLED      │  │  Python Service │
+    │  (Bluetooth LE) │  │  (Port 3030)    │
+    └─────────────────┘  └────────┬────────┘
+                                   │
+                                   ▼
+                         ┌─────────────────┐
+                         │  MohuanLED      │
+                         │  (Bluetooth LE) │
+                         └─────────────────┘
 ```
 
 ## 🚀 Quick Start
@@ -46,7 +67,8 @@ A modern Next.js web application for controlling MohuanLED Bluetooth lights dire
 - Node.js 18+ and Bun (or npm/yarn)
 - Bluetooth adapter (built-in or USB)
 - MohuanLED light device
-- **Supported browser**: Chrome, Edge, or Opera (Firefox/Safari have limited Web Bluetooth support)
+- **For Web Bluetooth**: Chrome, Edge, or Opera
+- **For Backend API**: Python 3.8+
 
 ### Installation
 
@@ -63,28 +85,50 @@ A modern Next.js web application for controlling MohuanLED Bluetooth lights dire
    npm install
    ```
 
-3. **Run the development server**
+3. **Install Python dependencies** (for Backend API mode)
    ```bash
-   bun run dev
-   # or
-   npm run dev
+   pip install bleak fastapi uvicorn
    ```
 
-4. **Open in browser**
-   Navigate to `http://localhost:3000`
+### Running the Application
+
+#### Option 1: Web Bluetooth Mode (Recommended for Local)
+
+```bash
+# Start Next.js development server
+bun run dev
+```
+
+Then open `http://localhost:3000` in Chrome/Edge/Opera and select "Web Bluetooth" mode.
+
+#### Option 2: Backend API Mode (For Restricted Environments)
+
+```bash
+# Terminal 1: Start Python backend
+python led-backend/led_service.py
+
+# Terminal 2: Start Next.js frontend
+bun run dev
+```
+
+Then open `http://localhost:3000` and select "Backend API" mode.
 
 ## 📁 Project Structure
 
 ```
+├── led-backend/
+│   ├── led_service.py        # Python Bluetooth service
+│   └── requirements.txt       # Python dependencies
 ├── src/
 │   ├── app/
 │   │   ├── page.tsx          # Main UI component
 │   │   ├── layout.tsx        # App layout
-│   │   └── globals.css       # Global styles
+│   │   ├── globals.css       # Global styles
+│   │   └── api/led/          # API proxy routes
 │   ├── components/ui/        # shadcn/ui components
 │   ├── hooks/                # Custom React hooks
 │   └── lib/
-│       ├── led-controller.ts # Web Bluetooth LED controller
+│       ├── led-controller.ts # Hybrid LED controller
 │       └── utils.ts          # Utility functions
 ├── package.json              # Dependencies
 ├── tailwind.config.ts        # Tailwind configuration
@@ -93,15 +137,25 @@ A modern Next.js web application for controlling MohuanLED Bluetooth lights dire
 
 ## 🎮 Usage
 
-### Web Interface
+### Web Bluetooth Mode
 
-1. **Connect** - Click "Connect to LED" button
-2. **Select Device** - Choose your MohuanLED device from the browser popup
-3. **Turn On** - Click the power button or toggle the switch
-4. **Control** - Use the color picker, brightness slider, and effect buttons
-5. **Disconnect** - Click "Disconnect" when done
+1. Open app in Chrome/Edge/Opera
+2. Select "Web Bluetooth" mode
+3. Click "Connect to LED"
+4. Select your MohuanLED device from the popup
+5. Control your light!
 
-### Supported Browsers
+### Backend API Mode
+
+1. Start the Python backend: `python led-backend/led_service.py`
+2. Open the app in any browser
+3. Select "Backend API" mode
+4. Click "Connect to LED"
+5. The backend will auto-discover and connect to your LED
+
+## 🌐 Browser Support
+
+### Web Bluetooth Mode
 
 | Browser | Support |
 |---------|---------|
@@ -111,15 +165,13 @@ A modern Next.js web application for controlling MohuanLED Bluetooth lights dire
 | Firefox | ❌ Not supported |
 | Safari | ⚠️ Limited support |
 
-## 🔧 How It Works
+### Backend API Mode
 
-This app uses the **Web Bluetooth API** to communicate directly with MohuanLED devices:
+| Browser | Support |
+|---------|---------|
+| All browsers | ✅ Full support |
 
-1. **Device Discovery** - `navigator.bluetooth.requestDevice()` scans for BLE devices
-2. **GATT Connection** - Connects to the device's GATT server
-3. **Characteristic Write** - Sends commands to control the LED
-
-### LED Commands
+## 🔧 LED Commands
 
 | Command | Bytes |
 |---------|-------|
@@ -133,7 +185,9 @@ This app uses the **Web Bluetooth API** to communicate directly with MohuanLED d
 - **Language**: TypeScript
 - **Styling**: Tailwind CSS 4
 - **UI Components**: shadcn/ui
-- **Bluetooth**: Web Bluetooth API
+- **Bluetooth (Web)**: Web Bluetooth API
+- **Bluetooth (Backend)**: bleak (Python)
+- **Backend**: FastAPI + Uvicorn
 
 ## 📝 Development
 
@@ -153,20 +207,25 @@ bun run lint
 
 ## 🐛 Troubleshooting
 
-### "Web Bluetooth is not supported"
-- Use Chrome, Edge, or Opera browser
-- Ensure you're on HTTPS or localhost
-- Check if Bluetooth is enabled on your device
+### Web Bluetooth Issues
 
-### "No devices found"
+**"Access to the feature 'bluetooth' is disallowed"**
+- You're in an iframe or restricted environment
+- Switch to "Backend API" mode and run the Python service
+
+**"No devices found"**
 - Make sure your LED is powered on
 - Ensure Bluetooth is enabled on your computer
-- Try refreshing the page and scanning again
+- Try refreshing the page
 
-### "Connection failed"
-- The LED might be connected to another device
-- Try resetting the LED by turning it off and on
-- Move closer to the LED
+### Backend API Issues
+
+**"LED backend not running"**
+- Start the Python service: `python led-backend/led_service.py`
+
+**"No LED devices found" (Backend)**
+- Make sure your LED is powered on
+- Check if Bluetooth is enabled
 
 ## 📜 License
 
@@ -176,6 +235,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 - Original library: [Walkercito/MohuanLED-Bluetooth_LED](https://github.com/Walkercito/MohuanLED-Bluetooth_LED)
 - [Web Bluetooth API](https://developer.mozilla.org/en-US/docs/Web/API/Web_Bluetooth_API)
+- [bleak](https://github.com/hbldh/bleak) - Bluetooth Low Energy platform agnostic library
 - [shadcn/ui](https://ui.shadcn.com/) - Beautiful UI components
 
 ---
