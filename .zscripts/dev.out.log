@@ -493,3 +493,4 @@ Read more: https://nextjs.org/docs/app/api-reference/config/next-config-js/allow
  POST /api/led/connect 500 in 9ms (compile: 1985µs, render: 7ms)
 ✓ Compiled in 543ms
  GET / 200 in 62ms (compile: 3ms, render: 59ms)
+ GET / 200 in 52ms (compile: 2ms, render: 50ms)
