@@ -70,6 +70,10 @@ class BrightnessRequest(BaseModel):
 
 class ConnectRequest(BaseModel):
     pass  # Auto-scan and connect
+    
+    class Config:
+        # Allow empty body
+        json_schema_extra = {"example": {}}
 
 
 class EffectRequest(BaseModel):
