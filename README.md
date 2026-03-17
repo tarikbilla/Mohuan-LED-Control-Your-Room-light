@@ -14,6 +14,8 @@ A modern Next.js web application for controlling MohuanLED Bluetooth lights. Sup
 
 ![MohuanLED Controller Screenshot](public/Screenshot.png)
 
+![MohuanLED Controller Screenshot](public/Screenshot-2.png)
+
 ## ✨ Features
 
 - 🔌 **Dual Connection Modes**
