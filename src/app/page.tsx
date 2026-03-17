@@ -36,6 +36,7 @@ import {
   Info,
   Server,
   Globe,
+  MonitorPlay,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { ledController, LEDState, ConnectionMode } from "@/lib/led-controller";
@@ -82,11 +83,7 @@ export default function LEDController() {
     // Check Web Bluetooth availability
     const webBTAvailable = ledController.isWebBluetoothSupported();
     setIsWebBluetoothAvailable(webBTAvailable);
-    
-    if (!webBTAvailable) {
-      setConnectionMode('backend-api');
-      ledController.setMode('backend-api');
-    }
+    // Don't auto-select mode - let user choose
 
     const unsubscribe = ledController.subscribe((state) => {
       setLedState(state);
@@ -108,9 +105,14 @@ export default function LEDController() {
     try {
       ledController.setMode(connectionMode);
       await ledController.connect();
+      const modeLabel = connectionMode === 'web-bluetooth' 
+        ? 'Web Bluetooth' 
+        : connectionMode === 'demo' 
+          ? 'Demo Mode' 
+          : 'Backend API';
       toast({
         title: "Connected!",
-        description: `Connected to ${ledController.getState().deviceName} via ${connectionMode === 'web-bluetooth' ? 'Web Bluetooth' : 'Backend API'}`,
+        description: `Connected to ${ledController.getState().deviceName} via ${modeLabel}`,
       });
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to connect";
@@ -274,12 +276,19 @@ export default function LEDController() {
               <Badge variant="outline" className={
                 ledState.mode === 'web-bluetooth' 
                   ? "border-blue-500/30 text-blue-400"
-                  : "border-green-500/30 text-green-400"
+                  : ledState.mode === 'demo'
+                    ? "border-purple-500/30 text-purple-400"
+                    : "border-green-500/30 text-green-400"
               }>
                 {ledState.mode === 'web-bluetooth' ? (
                   <>
                     <Globe className="h-3 w-3 mr-1" />
                     Web Bluetooth
+                  </>
+                ) : ledState.mode === 'demo' ? (
+                  <>
+                    <MonitorPlay className="h-3 w-3 mr-1" />
+                    Demo Mode
                   </>
                 ) : (
                   <>
@@ -311,16 +320,11 @@ export default function LEDController() {
       <main className="container mx-auto px-4 py-6">
         {/* Web Bluetooth Not Available Warning */}
         {!isWebBluetoothAvailable && (
-          <Alert className="mb-6 border-yellow-500/50 bg-yellow-500/10">
-            <AlertTriangle className="h-4 w-4 text-yellow-500" />
-            <AlertTitle className="text-yellow-500">Web Bluetooth Unavailable</AlertTitle>
-            <AlertDescription className="text-yellow-200">
-              Web Bluetooth is not available in this environment. Using Backend API mode instead.
-              <br />
-              <strong>Make sure to run the Python backend:</strong>
-              <code className="block mt-2 p-2 bg-black/30 rounded text-sm">
-                python led-backend/led_service.py
-              </code>
+          <Alert className="mb-6 border-blue-500/50 bg-blue-500/10">
+            <Info className="h-4 w-4 text-blue-500" />
+            <AlertTitle className="text-blue-500">Web Bluetooth Unavailable</AlertTitle>
+            <AlertDescription className="text-blue-200">
+              Web Bluetooth is not available in this environment. Please select <strong>Demo</strong> or <strong>Backend</strong> mode to continue.
             </AlertDescription>
           </Alert>
         )}
@@ -341,21 +345,22 @@ export default function LEDController() {
               </CardHeader>
               <CardContent className="space-y-4">
                 {/* Connection Mode Selector */}
-                {isWebBluetoothAvailable && !ledState.isConnected && (
+                {!ledState.isConnected && (
                   <div className="space-y-2">
                     <Label className="text-sm text-gray-400">Connection Mode</Label>
-                    <div className="grid grid-cols-2 gap-2">
+                    <div className="grid grid-cols-3 gap-2">
                       <Button
                         variant={connectionMode === 'web-bluetooth' ? 'default' : 'outline'}
                         size="sm"
                         onClick={() => setConnectionMode('web-bluetooth')}
+                        disabled={!isWebBluetoothAvailable}
                         className={connectionMode === 'web-bluetooth' 
                           ? "bg-blue-500 hover:bg-blue-600"
                           : "border-white/20 hover:bg-white/10"
                         }
                       >
                         <Globe className="h-4 w-4 mr-2" />
-                        Web Bluetooth
+                        Web BT
                       </Button>
                       <Button
                         variant={connectionMode === 'backend-api' ? 'default' : 'outline'}
@@ -367,9 +372,31 @@ export default function LEDController() {
                         }
                       >
                         <Server className="h-4 w-4 mr-2" />
-                        Backend API
+                        Backend
+                      </Button>
+                      <Button
+                        variant={connectionMode === 'demo' ? 'default' : 'outline'}
+                        size="sm"
+                        onClick={() => setConnectionMode('demo')}
+                        className={connectionMode === 'demo'
+                          ? "bg-purple-500 hover:bg-purple-600"
+                          : "border-white/20 hover:bg-white/10"
+                        }
+                      >
+                        <MonitorPlay className="h-4 w-4 mr-2" />
+                        Demo
                       </Button>
                     </div>
+                    {connectionMode === 'demo' && (
+                      <p className="text-xs text-purple-400 text-center mt-1">
+                        Simulated mode - no real Bluetooth needed
+                      </p>
+                    )}
+                    {connectionMode === 'web-bluetooth' && !isWebBluetoothAvailable && (
+                      <p className="text-xs text-yellow-400 text-center mt-1">
+                        Web Bluetooth unavailable in this environment
+                      </p>
+                    )}
                   </div>
                 )}
                 
@@ -393,7 +420,7 @@ export default function LEDController() {
                       )}
                     </Button>
                     
-                    {connectionMode === 'backend-api' && (
+                    {connectionMode === 'backend-api' && !ledState.isConnected && (
                       <p className="text-xs text-gray-500 text-center">
                         Requires Python backend running on port 3030
                       </p>
@@ -410,7 +437,7 @@ export default function LEDController() {
                         Device: {ledState.deviceName}
                       </p>
                       <p className="text-xs text-gray-500">
-                        Mode: {ledState.mode === 'web-bluetooth' ? 'Web Bluetooth' : 'Backend API'}
+                        Mode: {ledState.mode === 'web-bluetooth' ? 'Web Bluetooth' : ledState.mode === 'demo' ? 'Demo (Simulated)' : 'Backend API'}
                       </p>
                     </div>
                     
@@ -733,9 +760,32 @@ export default function LEDController() {
 
       {/* Footer */}
       <footer className="mt-auto border-t border-white/10 bg-black/20 py-4">
-        <div className="container mx-auto px-4 flex items-center justify-between text-sm text-gray-400">
+        <div className="container mx-auto px-4 flex flex-col sm:flex-row items-center justify-between text-sm text-gray-400 gap-2">
           <p>MohuanLED Controller</p>
-          <p>Web Bluetooth + Backend API</p>
+          <p>
+            Developed by{" "}
+            <a
+              href="https://github.com/tarikbilla"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-blue-400 hover:text-blue-300 transition-colors font-medium"
+            >
+              Tarik Billa
+            </a>
+          </p>
+          <p className="flex items-center gap-1">
+            <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+              <path fillRule="evenodd" d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z" clipRule="evenodd" />
+            </svg>
+            <a
+              href="https://github.com/tarikbilla/Mohuan-LED-Control-Your-Room-light"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-blue-400 hover:text-blue-300 transition-colors"
+            >
+              View on GitHub
+            </a>
+          </p>
         </div>
       </footer>
 

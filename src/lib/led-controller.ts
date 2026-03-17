@@ -23,10 +23,10 @@ export interface LEDState {
   effect: string | null;
   isConnected: boolean;
   deviceName: string | null;
-  mode: 'web-bluetooth' | 'backend-api' | 'unknown';
+  mode: 'web-bluetooth' | 'backend-api' | 'demo' | 'unknown';
 }
 
-export type ConnectionMode = 'web-bluetooth' | 'backend-api';
+export type ConnectionMode = 'web-bluetooth' | 'backend-api' | 'demo';
 
 class LEDBluetoothController {
   private device: BluetoothDevice | null = null;
@@ -44,6 +44,7 @@ class LEDBluetoothController {
   private stateListeners: Set<(state: LEDState) => void> = new Set();
   private effectInterval: NodeJS.Timeout | null = null;
   private mode: ConnectionMode = 'web-bluetooth';
+  private isDemoMode = false;
 
   /**
    * Check if Web Bluetooth is supported
@@ -175,6 +176,25 @@ class LEDBluetoothController {
   }
 
   /**
+   * Connect using Demo Mode (simulated Bluetooth for testing)
+   */
+  private async connectDemoMode(): Promise<boolean> {
+    // Simulate connection delay
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    
+    this.mode = 'demo';
+    this.isDemoMode = true;
+    this.updateState({
+      isConnected: true,
+      deviceName: 'Demo LED (Simulated)',
+      mode: 'demo',
+      isOn: false,
+    });
+    
+    return true;
+  }
+
+  /**
    * Connect using Backend API
    */
   private async connectBackendAPI(): Promise<boolean> {
@@ -192,8 +212,10 @@ class LEDBluetoothController {
       });
 
       if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.error || 'Failed to connect via backend');
+        const errorData = await response.json();
+        // Extract the detailed error message from the backend
+        const errorMessage = errorData.detail || errorData.error || 'Failed to connect via backend';
+        throw new Error(errorMessage);
       }
 
       const data = await response.json();
@@ -255,20 +277,31 @@ class LEDBluetoothController {
   }
 
   /**
-   * Connect to LED (auto-detect best method)
+   * Connect to LED (uses selected mode)
    */
   async connect(): Promise<boolean> {
-    // Try Web Bluetooth first if supported
-    if (this.isWebBluetoothSupported()) {
-      try {
-        return await this.connectWebBluetooth();
-      } catch (error) {
-        console.log('Web Bluetooth failed, trying backend API...');
-      }
+    console.log('Connect called with mode:', this.mode);
+    
+    // If demo mode is selected, use that
+    if (this.mode === 'demo') {
+      console.log('Using demo mode');
+      return await this.connectDemoMode();
     }
-
-    // Fall back to backend API
-    return await this.connectBackendAPI();
+    
+    // If backend mode is selected, use that
+    if (this.mode === 'backend-api') {
+      console.log('Using backend API mode');
+      return await this.connectBackendAPI();
+    }
+    
+    // Web Bluetooth mode - check if supported first
+    if (!this.isWebBluetoothSupported()) {
+      throw new Error('Web Bluetooth is not available in this environment. Please select "Backend" or "Demo" mode.');
+    }
+    
+    // Try Web Bluetooth
+    console.log('Trying Web Bluetooth');
+    return await this.connectWebBluetooth();
   }
 
   /**
@@ -276,6 +309,13 @@ class LEDBluetoothController {
    */
   async connectWithBackend(): Promise<boolean> {
     return await this.connectBackendAPI();
+  }
+
+  /**
+   * Connect using demo mode
+   */
+  async connectWithDemo(): Promise<boolean> {
+    return await this.connectDemoMode();
   }
 
   /**
@@ -300,6 +340,7 @@ class LEDBluetoothController {
    */
   async disconnect(): Promise<void> {
     this.stopEffect();
+    this.isDemoMode = false;
     
     if (this.mode === 'web-bluetooth' && this.device?.gatt?.connected) {
       this.device.gatt.disconnect();
@@ -329,6 +370,13 @@ class LEDBluetoothController {
    * Turn LED on
    */
   async turnOn(): Promise<void> {
+    if (this.mode === 'demo') {
+      // Simulate turn on
+      await new Promise(resolve => setTimeout(resolve, 100));
+      this.updateState({ isOn: true });
+      return;
+    }
+    
     if (this.mode === 'web-bluetooth') {
       await this.writeWebBluetooth(TURN_ON_CMD);
       this.updateState({ isOn: true });
@@ -344,6 +392,13 @@ class LEDBluetoothController {
   async turnOff(): Promise<void> {
     this.stopEffect();
     
+    if (this.mode === 'demo') {
+      // Simulate turn off
+      await new Promise(resolve => setTimeout(resolve, 100));
+      this.updateState({ isOn: false, effect: null });
+      return;
+    }
+    
     if (this.mode === 'web-bluetooth') {
       await this.writeWebBluetooth(TURN_OFF_CMD);
       this.updateState({ isOn: false, effect: null });
@@ -358,6 +413,16 @@ class LEDBluetoothController {
    */
   async setColor(r: number, g: number, b: number, brightness?: number): Promise<void> {
     const br = brightness ?? this.state.brightness;
+    
+    if (this.mode === 'demo') {
+      // Simulate color change
+      await new Promise(resolve => setTimeout(resolve, 50));
+      this.updateState({
+        rgbColor: [r, g, b],
+        brightness: br,
+      });
+      return;
+    }
     
     if (this.mode === 'web-bluetooth') {
       // Apply brightness scaling

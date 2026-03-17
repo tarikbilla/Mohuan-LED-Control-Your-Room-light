@@ -94,7 +94,13 @@ class LEDController:
     async def scan_devices(self) -> List[dict]:
         """Scan for LED devices"""
         LOGGER.info("Scanning for LED devices...")
-        devices = await BleakScanner.discover()
+        try:
+            devices = await BleakScanner.discover()
+        except Exception as e:
+            error_msg = str(e)
+            if "No such file or directory" in error_msg or "No Bluetooth adapter" in error_msg:
+                raise Exception("No Bluetooth adapter found. Please ensure Bluetooth is enabled on your Mac.")
+            raise Exception(f"Bluetooth scan failed: {error_msg}")
         
         led_devices = []
         for device in devices:
@@ -118,9 +124,14 @@ class LEDController:
             await self.disconnect()
             
             # Scan for devices
-            devices = await self.scan_devices()
+            try:
+                devices = await self.scan_devices()
+            except Exception as e:
+                # Re-raise with clearer message
+                raise Exception(str(e))
+            
             if not devices:
-                raise Exception("No LED devices found. Make sure your LED is powered on.")
+                raise Exception("No LED devices found. Make sure your LED is powered on and in range.")
             
             # Connect to first device
             device = devices[0]

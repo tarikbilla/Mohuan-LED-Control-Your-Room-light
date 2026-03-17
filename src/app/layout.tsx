@@ -17,10 +17,7 @@ export const metadata: Metadata = {
   title: "MohuanLED Controller - Bluetooth LED Control",
   description: "Control your MohuanLED Bluetooth lights from your browser. Features color picker, brightness control, and dynamic effects.",
   keywords: ["MohuanLED", "Bluetooth", "LED", "Smart Light", "BLE", "Controller"],
-  authors: [{ name: "MohuanLED Controller" }],
-  icons: {
-    icon: "https://z-cdn.chatglm.cn/z-ai/static/logo.svg",
-  },
+  authors: [{ name: "Tarik Billa" }],
   openGraph: {
     title: "MohuanLED Controller",
     description: "Bluetooth LED Control for MohuanLED lights",

@@ -1,9 +1,10 @@
 # 🌈 MohuanLED Controller
 
-A modern Next.js web application for controlling MohuanLED Bluetooth lights. Supports **two connection modes**:
+A modern Next.js web application for controlling MohuanLED Bluetooth lights. Supports **three connection modes**:
 
 1. **Web Bluetooth API** - Direct browser-to-LED communication (Chrome, Edge, Opera)
 2. **Backend API** - Via Python service for environments where Web Bluetooth is blocked
+3. **Demo Mode** - Simulated mode for testing without Bluetooth hardware
 
 ![Next.js](https://img.shields.io/badge/Next.js-16-black?style=flat-square&logo=next.js)
 ![Web Bluetooth](https://img.shields.io/badge/Web%20Bluetooth-API-blue?style=flat-square&logo=bluetooth)
@@ -18,9 +19,10 @@ A modern Next.js web application for controlling MohuanLED Bluetooth lights. Sup
 
 ## ✨ Features
 
-- 🔌 **Dual Connection Modes**
+- 🔌 **Three Connection Modes**
   - Web Bluetooth (direct browser connection)
   - Backend API (via Python service)
+  - Demo Mode (simulated for testing)
 - 💡 **Power Control** - Turn lights on/off with a single click
 - 🎨 **Color Picker** - Full RGB color selection with preset colors
 - ☀️ **Brightness Control** - Adjustable brightness from 0-100%
@@ -29,7 +31,7 @@ A modern Next.js web application for controlling MohuanLED Bluetooth lights. Sup
   - Breathing Effect
   - Strobe Light
 - 📱 **Responsive Design** - Works on desktop and mobile
-- 🔄 **Auto-Fallback** - Automatically switches to Backend API when Web Bluetooth is unavailable
+- 🎯 **LED Preview** - Real-time preview of LED state
 
 ## 🚀 Quick Start
 
@@ -70,7 +72,7 @@ A modern Next.js web application for controlling MohuanLED Bluetooth lights. Sup
 bun run dev
 ```
 
-Then open `http://localhost:3000` in Chrome/Edge/Opera and select "Web Bluetooth" mode.
+Then open `http://localhost:3000` in Chrome/Edge/Opera and select "Web BT" mode.
 
 #### Option 2: Backend API Mode (For Restricted Environments)
 
@@ -82,7 +84,15 @@ python led-backend/led_service.py
 bun run dev
 ```
 
-Then open `http://localhost:3000` and select "Backend API" mode.
+Then open `http://localhost:3000` and select "Backend" mode.
+
+#### Option 3: Demo Mode (For Testing Without Hardware)
+
+```bash
+bun run dev
+```
+
+Then open `http://localhost:3000` and select "Demo" mode to test the UI without any Bluetooth hardware.
 
 ## 📁 Project Structure
 
@@ -101,6 +111,8 @@ Then open `http://localhost:3000` and select "Backend API" mode.
 │   └── lib/
 │       ├── led-controller.ts # Hybrid LED controller
 │       └── utils.ts          # Utility functions
+├── public/
+│   └── Screenshot.png        # App screenshot
 ├── package.json              # Dependencies
 ├── tailwind.config.ts        # Tailwind configuration
 └── README.md                 # This file
@@ -111,7 +123,7 @@ Then open `http://localhost:3000` and select "Backend API" mode.
 ### Web Bluetooth Mode
 
 1. Open app in Chrome/Edge/Opera
-2. Select "Web Bluetooth" mode
+2. Select "Web BT" mode
 3. Click "Connect to LED"
 4. Select your MohuanLED device from the popup
 5. Control your light!
@@ -120,9 +132,16 @@ Then open `http://localhost:3000` and select "Backend API" mode.
 
 1. Start the Python backend: `python led-backend/led_service.py`
 2. Open the app in any browser
-3. Select "Backend API" mode
+3. Select "Backend" mode
 4. Click "Connect to LED"
 5. The backend will auto-discover and connect to your LED
+
+### Demo Mode
+
+1. Open the app in any browser
+2. Select "Demo" mode
+3. Click "Connect to LED"
+4. Test all features without real hardware!
 
 ## 🌐 Browser Support
 
@@ -136,7 +155,7 @@ Then open `http://localhost:3000` and select "Backend API" mode.
 | Firefox | ❌ Not supported |
 | Safari | ⚠️ Limited support |
 
-### Backend API Mode
+### Backend API & Demo Mode
 
 | Browser | Support |
 |---------|---------|
@@ -182,7 +201,7 @@ bun run lint
 
 **"Access to the feature 'bluetooth' is disallowed"**
 - You're in an iframe or restricted environment
-- Switch to "Backend API" mode and run the Python service
+- Switch to "Backend" or "Demo" mode
 
 **"No devices found"**
 - Make sure your LED is powered on
@@ -198,9 +217,17 @@ bun run lint
 - Make sure your LED is powered on
 - Check if Bluetooth is enabled
 
+**"No Bluetooth adapter found"**
+- Ensure your computer has Bluetooth capability
+- Enable Bluetooth in system settings
+
 ## 📜 License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+## 👨‍💻 Author
+
+Developed by [Tarik Billa](https://github.com/tarikbilla)
 
 ## 🙏 Acknowledgments
 
